@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4f7f4">
+<title>Learning Resources</title>
+<style>
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+:root{font:100%/1.5 system-ui,sans-serif;color:#192c26;background:#f4f7f4}
+body{margin:0}
+main{width:min(60rem,100% - 2rem);margin:clamp(2rem,8vw,6rem) auto}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:2rem}
+h1,h2,p{margin:0}
+h1{font:500 clamp(2.3rem,6vw,4.25rem)/1.05 Georgia,serif;letter-spacing:-.045em}
+header p{color:#4a6257;margin-top:.65rem}
+button,input{font:inherit}
+button{cursor:pointer;border:1px solid #c7d6ce;background:white;color:#193a2e;border-radius:.65rem;padding:.55rem .85rem;min-height:44px}
+button:hover{background:#edf5ef}
+.primary{color:white;background:#225842;border-color:#225842}
+.primary:hover{background:#174332}
+:focus-visible{outline:3px solid #56896c;outline-offset:3px}
+section,dialog{background:white;border:1px solid #d7e2da;border-radius:1rem}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:1rem;border-bottom:1px solid #e1e9e3}
+input{width:100%;border:1px solid #bdcfc3;border-radius:.55rem;padding:.65rem .8rem;color:inherit;background:white;min-width:0}
+.toolbar input{max-width:23rem}
+#count{white-space:nowrap;color:#476458;font-size:.875rem}
+ul{margin:0;padding:0;list-style:none}
+li{display:flex;justify-content:space-between;gap:1rem;align-items:center;padding:1rem 1.25rem}
+li+li{border-top:1px solid #e1e9e3}
+.details{min-width:0;overflow-wrap:anywhere}
+.details p{color:#4a6257;margin-top:.2rem}
+a{color:#1f6448;text-underline-offset:.2em}
+.actions,.form-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+.empty{text-align:center;padding:3.25rem 1rem;color:#4a6257}
+.empty strong{display:block;color:#192c26;font-size:1.15rem;margin-bottom:.35rem}
+.backups{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem}
+footer{color:#4a6257;font-size:.875rem;margin-top:.85rem}
+dialog{color:inherit;padding:1.4rem;width:min(28rem,100% - 2rem)}
+dialog{max-height:calc(100dvh - 2rem);overflow:auto}
+dialog::backdrop{background:#142d24a0}
+form{display:grid;gap:1rem}
+label{display:grid;gap:.35rem;font-weight:600}
+.checkbox{display:flex;align-items:center;gap:.6rem;min-height:44px}
+.checkbox input{width:1.125rem;height:1.125rem;margin:0;accent-color:#225842}
+label span{font-weight:400;color:#4a6257}
+.form-actions{justify-content:flex-end}
+#message{color:#8c2828;margin-top:.75rem}
+@media(max-width:35rem){li{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<main>
+<header><div><h1>Learning Resources</h1><p>Save the things you want to learn from.</p></div><button class="primary" id="add">+ Add resource</button></header>
+<section aria-label="Saved resources">
+<div class="toolbar"><input id="search" type="search" placeholder="Search resources" aria-label="Search resources"><span id="count" aria-live="polite"></span></div>
+<ul id="list"></ul><div class="empty" id="empty"><strong id="empty-title"></strong><p id="empty-description"></p></div>
+</section>
+<div class="backups" aria-label="Resource backups">
+<button type="button" id="download">Download backup</button>
+<button type="button" id="upload">Upload backup</button>
+<input type="file" id="backup-file" accept=".json,application/json" hidden>
+</div>
+<p id="backup-status" role="status"></p>
+<footer>Entries are saved on this browser and device.</footer>
+<p id="message" role="alert"></p>
+</main>
+<dialog id="editor" aria-labelledby="editor-title">
+<form id="form">
+<h2 id="editor-title">Add resource</h2>
+<label>Name / title<input name="title" required maxlength="200" autofocus></label>
+<label><div>Link / source <span>(optional)</span></div><input name="source" maxlength="1000" placeholder="Website, book, or other source"></label>
+<label><div>Company / coach <span>(optional)</span></div><input name="company" maxlength="200"></label>
+<label><div>Start date <span>(optional)</span></div><input type="date" name="startDate"></label>
+<label class="checkbox"><input type="checkbox" id="limited-time">Limited-time resource</label>
+<label id="expiry-field" hidden>Expiration date<input type="date" name="expiryDate" disabled></label>
+<p id="form-error" role="alert" hidden></p>
+<div class="form-actions"><button type="button" id="cancel">Cancel</button><button class="primary" type="submit">Save resource</button></div>
+</form>
+</dialog>
+<script>
+const key = 'learning-resources-v1';
+const byId = id => document.getElementById(id);
+const editor = byId('editor');
+const form = byId('form');
+const search = byId('search');
+const list = byId('list');
+const message = byId('message');
+const titleInput = form.elements.namedItem('title');
+const startDate = form.elements.namedItem('startDate');
+const expiryDate = form.elements.namedItem('expiryDate');
+const limitedTime = byId('limited-time');
+let resources = [];
+let editingId;
+let storageReadable = true;
+try {
+  resources = JSON.parse(localStorage.getItem(key) || '[]');
+  if (!Array.isArray(resources)) throw new Error('Invalid saved entries');
+} catch {
+  resources = [];
+  storageReadable = false;
+  message.textContent = 'Saved resources could not be loaded. Try reopening this page.';
+}
+
+function save(next) {
+  if (!storageReadable) return false;
+  try {
+    localStorage.setItem(key, JSON.stringify(next));
+    resources = next;
+    message.textContent = '';
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sourceUrl(source) {
+  const candidate = /^www\./i.test(source) ? 'https://' + source : source;
+  if (!/^https?:\/\//i.test(candidate)) return null;
+  try { return new URL(candidate).href; } catch { return null; }
+}
+
+function updateDateFields() {
+  byId('expiry-field').hidden = !limitedTime.checked;
+  expiryDate.disabled = !limitedTime.checked;
+  expiryDate.required = limitedTime.checked;
+  expiryDate.min = startDate.value;
+}
+
+function dateLabel(value) {
+  return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeZone: 'UTC'})
+    .format(new Date(value + 'T00:00:00Z'));
+}
+
+function edit(resource) {
+  editingId = resource?.id;
+  byId('editor-title').textContent = resource ? 'Edit resource' : 'Add resource';
+  byId('form-error').hidden = true;
+  titleInput.setCustomValidity('');
+  for (const name of ['title', 'source', 'company', 'startDate', 'expiryDate']) {
+    form.elements.namedItem(name).value = resource?.[name] || '';
+  }
+  limitedTime.checked = Boolean(resource?.expiryDate);
+  updateDateFields();
+  editor.showModal();
+}
+
+function action(label, handler, title) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.setAttribute('aria-label', label + ' ' + title);
+  button.addEventListener('click', handler);
+  return button;
+}
+
+function render() {
+  const query = search.value.trim().toLowerCase();
+  const matches = resources.filter(resource => [resource.title, resource.company, resource.source]
+    .some(value => value.toLowerCase().includes(query)))
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, {sensitivity: 'base'}));
+  byId('count').textContent = query ? matches.length + ' of ' + resources.length :
+    resources.length + (resources.length === 1 ? ' resource' : ' resources');
+  byId('empty').hidden = matches.length > 0;
+  byId('empty-title').textContent = query ? 'No matching resources' : 'No resources yet';
+  byId('empty-description').textContent = query ? 'Try a different search.' : 'Add a course, video, book, or website to get started.';
+  list.replaceChildren();
+  for (const resource of matches) {
+    const row = document.createElement('li');
+    const details = document.createElement('div');
+    details.className = 'details';
+    const title = document.createElement('strong');
+    title.textContent = resource.title;
+    details.append(title);
+    if (resource.company) {
+      const company = document.createElement('p');
+      company.textContent = resource.company;
+      details.append(company);
+    }
+    if (resource.source) {
+      const url = sourceUrl(resource.source);
+      const source = document.createElement(url ? 'a' : 'p');
+      source.textContent = resource.source;
+      if (url) {
+        source.href = url;
+        source.target = '_blank';
+        source.rel = 'noopener noreferrer';
+      }
+      const line = document.createElement('div');
+      line.append(source);
+      details.append(line);
+    }
+    for (const [label, value] of [['Starts', resource.startDate], ['Expires', resource.expiryDate]]) {
+      if (!value) continue;
+      const line = document.createElement('p');
+      const date = document.createElement('time');
+      date.dateTime = value;
+      date.textContent = dateLabel(value);
+      line.append(label + ' ', date);
+      details.append(line);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    actions.append(action('Edit', () => edit(resource), resource.title), action('Delete', () => {
+      if (!confirm('Delete “' + resource.title + '”?')) return;
+      if (save(resources.filter(item => item.id !== resource.id))) {
+        render();
+        byId('add').focus();
+      } else {
+        message.textContent = 'Could not delete this resource. Browser storage may be unavailable.';
+      }
+    }, resource.title));
+    row.append(details, actions);
+    list.append(row);
+  }
+}
+
+function downloadBackup() {
+  if (!storageReadable) {
+    message.textContent = 'Saved resources could not be loaded for backup.';
+    return;
+  }
+  const backup = JSON.stringify({version: 1, resources}, null, 2);
+  const url = URL.createObjectURL(new Blob([backup], {type: 'application/json'}));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'learning-resources-backup.json';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function validDate(value) {
+  if (value === undefined || value === '') return true;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T00:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function readBackup(backup) {
+  if (backup?.version !== 1 || !Array.isArray(backup.resources)) throw new Error('Invalid backup');
+  return backup.resources.map(item => {
+    if (!item || typeof item.id !== 'string' || !item.id ||
+        typeof item.title !== 'string' || !item.title.trim() ||
+        typeof item.company !== 'string' || typeof item.source !== 'string' ||
+        !validDate(item.startDate) || !validDate(item.expiryDate) ||
+        (item.startDate && item.expiryDate && item.expiryDate < item.startDate)) {
+      throw new Error('Invalid resource');
+    }
+    const {id, title, company, source, startDate = '', expiryDate = ''} = item;
+    return {id, title: title.trim(), company, source, startDate, expiryDate};
+  });
+}
+
+const backupFile = byId('backup-file');
+const backupStatus = byId('backup-status');
+byId('download').addEventListener('click', downloadBackup);
+byId('upload').addEventListener('click', () => backupFile.click());
+backupFile.addEventListener('change', async () => {
+  const file = backupFile.files[0];
+  backupFile.value = '';
+  if (!file) return;
+  backupStatus.textContent = '';
+  message.textContent = '';
+  let imported;
+  try {
+    imported = readBackup(JSON.parse(await file.text()));
+  } catch {
+    message.textContent = 'Choose a valid Learning Resources backup file.';
+    return;
+  }
+  const merged = new Map(resources.map(item => [item.id, item]));
+  for (const item of imported) {
+    if (!merged.has(item.id)) merged.set(item.id, item);
+  }
+  const added = merged.size - resources.length;
+  if (!save([...merged.values()])) {
+    message.textContent = 'Could not import the backup. Browser storage may be unavailable.';
+    return;
+  }
+  search.value = '';
+  render();
+  backupStatus.textContent = added === 1 ? 'Imported 1 resource.' : 'Imported ' + added + ' resources.';
+});
+
+byId('add').addEventListener('click', () => edit());
+byId('cancel').addEventListener('click', () => editor.close());
+search.addEventListener('input', render);
+limitedTime.addEventListener('change', updateDateFields);
+startDate.addEventListener('input', updateDateFields);
+titleInput.addEventListener('input', () => titleInput.setCustomValidity(''));
+form.addEventListener('submit', event => {
+  event.preventDefault();
+  const title = titleInput.value.trim();
+  if (!title) {
+    titleInput.setCustomValidity('Enter a resource title.');
+    titleInput.reportValidity();
+    return;
+  }
+  const values = new FormData(form);
+  const resource = {id: editingId || crypto.randomUUID(), title,
+    source: values.get('source').trim(), company: values.get('company').trim(),
+    startDate: startDate.value, expiryDate: limitedTime.checked ? expiryDate.value : ''};
+  const next = editingId ? resources.map(item => item.id === editingId ? resource : item) : [resource, ...resources];
+  if (!save(next)) {
+    const error = byId('form-error');
+    error.textContent = 'Could not save this resource. Browser storage may be unavailable.';
+    error.hidden = false;
+    return;
+  }
+  if (!editingId) search.value = '';
+  editor.close();
+  render();
+  byId('add').focus();
+});
+render();
+</script>
+</body>
+</html>
